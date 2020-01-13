@@ -111,13 +111,13 @@ Libreswan 支持通过使用 RSA 签名算法的 X.509 Machine Certificates 来�
 
 1. 生成 Certificate Authority (CA) 和 VPN 服务器证书：
 
-   **注：** 使用 "-v" 参数指定证书的有效期（单位：月），例如 "-v 36"。
+   **注：** 使用 "-v" 参数指定证书的有效期（单位：月），例如 "-v 120"。
 
    ```bash
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -x -n "IKEv2 VPN CA" \
      -s "O=IKEv2 VPN,CN=IKEv2 VPN CA" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t "CT,," -2
    ```
 
@@ -137,7 +137,7 @@ Libreswan 支持通过使用 RSA 签名算法的 X.509 Machine Certificates 来�
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -c "IKEv2 VPN CA" -n "$PUBLIC_IP" \
      -s "O=IKEv2 VPN,CN=$PUBLIC_IP" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t ",," \
      --keyUsage digitalSignature,keyEncipherment \
      --extKeyUsage serverAuth \
@@ -154,7 +154,7 @@ Libreswan 支持通过使用 RSA 签名算法的 X.509 Machine Certificates 来�
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -c "IKEv2 VPN CA" -n "vpnclient" \
      -s "O=IKEv2 VPN,CN=vpnclient" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t ",," \
      --keyUsage digitalSignature,keyEncipherment \
      --extKeyUsage serverAuth,clientAuth -8 "vpnclient"
@@ -178,7 +178,7 @@ Libreswan 支持通过使用 RSA 签名算法的 X.509 Machine Certificates 来�
 
    **注：** 如需同时连接多个客户端，则必须为每个客户端生成唯一的证书。
 
-1. （适用于 macOS 和 iOS 客户端） 导出 CA 证书到 `vpnca.cer`：
+1. （适用于 iOS 客户端） 导出 CA 证书到 `vpnca.cer`：
 
    ```bash
    certutil -L -d sql:/etc/ipsec.d -n "IKEv2 VPN CA" -a -o vpnca.cer
@@ -213,6 +213,12 @@ VPN 服务器上的 IKEv2 配置到此已完成。按照下面的步骤配置你
 
 **注：** 如果你在上面的第一步指定了服务器的域名（而不是 IP 地址），则必须在 **服务器地址** 和 **远程 ID** 字段中输入该域名。
 
+* [Windows 7, 8.x 和 10](#windows-7-8x-和-10)
+* [OS X (macOS)](#os-x-macos)
+* [Android 10 和更新版本](#android-10-和更新版本)
+* [Android 4.x to 9.x](#android-4x-to-9x)
+* [iOS (iPhone/iPad)](#ios)
+
 ### Windows 7, 8.x 和 10
 
 1. 将文件 `vpnclient.p12` 安全地传送到你的计算机，然后导入到 "计算机账户" 证书存储。在导入证书后，你必须确保将客户端证书放在 "个人 -> 证书" 目录中，并且将 CA 证书放在 "受信任的根证书颁发机构 -> 证书" 目录中。
@@ -230,7 +236,7 @@ VPN 服务器上的 IKEv2 配置到此已完成。按照下面的步骤配置你
 
 ### OS X (macOS)
 
-首先，将文件 `vpnca.cer` 和 `vpnclient.p12` 安全地传送到你的 Mac，然后双击它们并逐个导入到 **钥匙串访问** 中的 **登录** 钥匙串。下一步，双击刚才导入的 `IKEv2 VPN CA` 证书，展开 **信任** 并从 **IP 安全 (IPsec)** 下拉菜单中选择 **始终信任**。在完成之后，检查并确保 `vpnclient` 和 `IKEv2 VPN CA` 都显示在 **登录** 钥匙串 的 **证书** 类别中。 
+首先，将文件 `vpnclient.p12` 安全地传送到你的 Mac，然后双击以导入到 **钥匙串访问** 中的 **登录** 钥匙串。下一步，双击导入的 `IKEv2 VPN CA` 证书，展开 **信任** 并从 **IP 安全 (IPsec)** 下拉菜单中选择 **始终信任**。在完成之后，检查并确保 `vpnclient` 和 `IKEv2 VPN CA` 都显示在 **登录** 钥匙串 的 **证书** 类别中。
 
 1. 打开系统偏好设置并转到网络部分。
 1. 在窗口左下角单击 **+** 按钮。
@@ -249,20 +255,42 @@ VPN 服务器上的 IKEv2 配置到此已完成。按照下面的步骤配置你
 1. 单击 **应用** 保存VPN连接信息。
 1. 单击 **连接**。
 
-### Android 4.x 和更新版本
+### Android 10 和更新版本
 
 1. 将文件 `vpnclient.p12` 安全地传送到你的 Android 设备。
 1. 从 **Google Play** 安装 <a href="https://play.google.com/store/apps/details?id=org.strongswan.android" target="_blank">strongSwan VPN 客户端</a>。
-1. 打开 VPN 客户端，然后单击 **Add VPN Profile**。
+1. 启动 **设置** 应用程序。
+1. 进入 安全 -> 高级 -> 加密与凭据。
+1. 单击 **从存储设备（或 SD 卡）安装**。
+1. 选择你从服务器复制过来的 `.p12` 文件，并按提示操作。   
+   **注：** 要查找 `.p12` 文件，单击左上角的抽拉式菜单，然后单击你的设备名称。
+1. 启动 strongSwan VPN 客户端，然后单击 **Add VPN Profile**。
+1. 在 **Server** 字段中输入 `你的 VPN 服务器 IP` （或者域名）。
+1. 在 **VPN Type** 下拉菜单选择 **IKEv2 Certificate**。
+1. 单击 **Select user certificate**，选择你的新 VPN 客户端证书并确认。
+1. 保存新的 VPN 连接，然后单击它以开始连接。
+
+### Android 4.x to 9.x
+
+1. 将文件 `vpnclient.p12` 安全地传送到你的 Android 设备。
+1. 从 **Google Play** 安装 <a href="https://play.google.com/store/apps/details?id=org.strongswan.android" target="_blank">strongSwan VPN 客户端</a>。
+1. 启动 strongSwan VPN 客户端，然后单击 **Add VPN Profile**。
 1. 在 **Server** 字段中输入 `你的 VPN 服务器 IP` （或者域名）。
 1. 在 **VPN Type** 下拉菜单选择 **IKEv2 Certificate**。
 1. 单击 **Select user certificate**，然后单击 **Install certificate**。
-1. 选择你从服务器复制过来的 `.p12` 文件，并按提示操作。
+1. 选择你从服务器复制过来的 `.p12` 文件，并按提示操作。   
+   **注：** 要查找 `.p12` 文件，单击左上角的抽拉式菜单，然后单击你的设备名称。
 1. 保存新的 VPN 连接，然后单击它以开始连接。
 
-### iOS (iPhone/iPad)
+### iOS
 
-首先，将文件 `vpnca.cer` 和 `vpnclient.p12` 安全地传送到你的 iOS 设备，并且逐个导入为 iOS 配置描述文件。你可以使用 AirDrop （隔空投送）来传输文件。或者，你也可以将文件放在一个你的安全的托管网站上，然后在 Mobile Safari 中下载并导入它们。在完成之后，检查并确保 `vpnclient` 和 `IKEv2 VPN CA` 都显示在设置 -> 通用 -> 描述文件中。
+首先，将文件 `vpnca.cer` 和 `vpnclient.p12` 安全地传送到你的 iOS 设备，并且逐个导入为 iOS 配置描述文件。要传送文件，你可以使用：
+
+1. AirDrop （隔空投送），或者
+1. 将文件上传到设备，在 "文件" 应用程序中单击它们，然后到 "设置" 中导入，或者
+1. 将文件放在一个你的安全的托管网站上，然后在 Mobile Safari 中下载并导入它们。
+
+在完成之后，检查并确保 `vpnclient` 和 `IKEv2 VPN CA` 都显示在设置 -> 通用 -> 描述文件中。
 
 1. 进入设置 -> 通用 -> VPN。
 1. 单击 **添加VPN配置...**。

@@ -111,13 +111,13 @@ The following example shows how to configure IKEv2 with Libreswan. Commands belo
 
 1. Generate Certificate Authority (CA) and VPN server certificates:
 
-   **Note:** Specify the certificate validity period (in months) with "-v". e.g. "-v 36".
+   **Note:** Specify the certificate validity period (in months) with "-v". e.g. "-v 120".
 
    ```bash
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -x -n "IKEv2 VPN CA" \
      -s "O=IKEv2 VPN,CN=IKEv2 VPN CA" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t "CT,," -2
    ```
 
@@ -137,7 +137,7 @@ The following example shows how to configure IKEv2 with Libreswan. Commands belo
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -c "IKEv2 VPN CA" -n "$PUBLIC_IP" \
      -s "O=IKEv2 VPN,CN=$PUBLIC_IP" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t ",," \
      --keyUsage digitalSignature,keyEncipherment \
      --extKeyUsage serverAuth \
@@ -154,7 +154,7 @@ The following example shows how to configure IKEv2 with Libreswan. Commands belo
    certutil -z <(head -c 1024 /dev/urandom) \
      -S -c "IKEv2 VPN CA" -n "vpnclient" \
      -s "O=IKEv2 VPN,CN=vpnclient" \
-     -k rsa -g 4096 -v 36 \
+     -k rsa -g 4096 -v 120 \
      -d sql:/etc/ipsec.d -t ",," \
      --keyUsage digitalSignature,keyEncipherment \
      --extKeyUsage serverAuth,clientAuth -8 "vpnclient"
@@ -178,7 +178,7 @@ The following example shows how to configure IKEv2 with Libreswan. Commands belo
 
    **Note:** To connect multiple VPN clients simultaneously, you must generate a unique certificate for each.
 
-1. (For macOS and iOS clients) Export the CA certificate as `vpnca.cer`:
+1. (For iOS clients) Export the CA certificate as `vpnca.cer`:
 
    ```bash
    certutil -L -d sql:/etc/ipsec.d -n "IKEv2 VPN CA" -a -o vpnca.cer
@@ -213,6 +213,12 @@ The IKEv2 setup on the VPN server is now complete. Follow instructions below to 
 
 **Note:** If you specified the server's DNS name (instead of its IP address) in step 1 above, you must enter the DNS name in the **Server** and **Remote ID** fields.
 
+* [Windows 7, 8.x and 10](#windows-7-8x-and-10)
+* [OS X (macOS)](#os-x-macos)
+* [Android 10 and newer](#android-10-and-newer)
+* [Android 4.x to 9.x](#android-4x-to-9x)
+* [iOS (iPhone/iPad)](#ios)
+
 ### Windows 7, 8.x and 10
 
 1. Securely transfer `vpnclient.p12` to your computer, then import it into the "Computer account" certificate store. Make sure that the client cert is placed in "Personal -> Certificates", and the CA cert is placed in "Trusted Root Certification Authorities -> Certificates".
@@ -230,7 +236,7 @@ The IKEv2 setup on the VPN server is now complete. Follow instructions below to 
 
 ### OS X (macOS)
 
-First, securely transfer both `vpnca.cer` and `vpnclient.p12` to your Mac, then double-click to import them one by one into the **login** keychain in **Keychain Access**. Next, double-click on the imported `IKEv2 VPN CA` certificate, expand **Trust** and select **Always Trust** from the **IP Security (IPsec)** drop-down menu. When finished, check to make sure both `vpnclient` and `IKEv2 VPN CA` are listed under the **Certificates** category of **login** keychain.
+First, securely transfer `vpnclient.p12` to your Mac, then double-click to import into the **login** keychain in **Keychain Access**. Next, double-click on the imported `IKEv2 VPN CA` certificate, expand **Trust** and select **Always Trust** from the **IP Security (IPsec)** drop-down menu. When finished, check to make sure both `vpnclient` and `IKEv2 VPN CA` are listed under the **Certificates** category of **login** keychain.
 
 1. Open System Preferences and go to the Network section.
 1. Click the **+** button in the lower-left corner of the window.
@@ -249,20 +255,42 @@ First, securely transfer both `vpnca.cer` and `vpnclient.p12` to your Mac, then 
 1. Click **Apply** to save the VPN connection information.
 1. Click **Connect**.
 
-### Android 4.x and newer
+### Android 10 and newer
 
 1. Securely transfer `vpnclient.p12` to your Android device.
 1. Install <a href="https://play.google.com/store/apps/details?id=org.strongswan.android" target="_blank">strongSwan VPN Client</a> from **Google Play**.
-1. Launch the VPN client and tap **Add VPN Profile**.
+1. Launch the **Settings** application.
+1. Go to Security -> Advanced -> Encryption & credentials.
+1. Tap **Install from storage (or SD card)**.
+1. Choose the `.p12` file you copied from the VPN server, and follow the prompts.   
+   **Note:** To find the `.p12` file, click on the three-line menu button, then click on your device name.
+1. Launch the strongSwan VPN client and tap **Add VPN Profile**.
+1. Enter `Your VPN Server IP` (or DNS name) in the **Server** field.
+1. Select **IKEv2 Certificate** from the **VPN Type** drop-down menu.
+1. Tap **Select user certificate**, select your new VPN client certificate and confirm.
+1. Save the new VPN connection, then tap to connect.
+
+### Android 4.x to 9.x
+
+1. Securely transfer `vpnclient.p12` to your Android device.
+1. Install <a href="https://play.google.com/store/apps/details?id=org.strongswan.android" target="_blank">strongSwan VPN Client</a> from **Google Play**.
+1. Launch the strongSwan VPN client and tap **Add VPN Profile**.
 1. Enter `Your VPN Server IP` (or DNS name) in the **Server** field.
 1. Select **IKEv2 Certificate** from the **VPN Type** drop-down menu.
 1. Tap **Select user certificate**, then tap **Install certificate**.
-1. Choose the `.p12` file you copied from the VPN server, and follow the prompts.
+1. Choose the `.p12` file you copied from the VPN server, and follow the prompts.   
+   **Note:** To find the `.p12` file, click on the three-line menu button, then click on your device name.
 1. Save the new VPN connection, then tap to connect.
 
-### iOS (iPhone/iPad)
+### iOS
 
-First, securely transfer both `vpnca.cer` and `vpnclient.p12` to your iOS device, then import them one by one as iOS profiles. To transfer the files, you may use AirDrop. Alternatively, host the files on a secure website of yours, then download and import them in Mobile Safari. When finished, check to make sure both `vpnclient` and `IKEv2 VPN CA` are listed under Settings -> General -> Profiles.
+First, securely transfer both `vpnca.cer` and `vpnclient.p12` to your iOS device, then import them one by one as iOS profiles. To transfer the files, you may use:
+
+1. AirDrop, or
+1. Upload the files to your device, tap them in the "Files" app, then go to "Settings" and import, or
+1. Host the files on a secure website of yours, then download and import them in Mobile Safari.
+
+When finished, check to make sure both `vpnclient` and `IKEv2 VPN CA` are listed under Settings -> General -> Profiles.
 
 1. Go to Settings -> General -> VPN.
 1. Tap **Add VPN Configuration...**.
