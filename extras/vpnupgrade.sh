@@ -1,8 +1,12 @@
 #!/bin/sh
 #
-# Script to upgrade Libreswan on Ubuntu and Debian
+# Script to update Libreswan on Ubuntu, Debian, CentOS/RHEL, Rocky Linux,
+# AlmaLinux, Oracle Linux, Amazon Linux 2 and Alpine Linux
 #
-# Copyright (C) 2016-2019 Lin Song <linsongui@gmail.com>
+# The latest version of this script is available at:
+# https://github.com/hwdsl2/setup-ipsec-vpn
+#
+# Copyright (C) 2021-2022 Lin Song <linsongui@gmail.com>
 #
 # This work is licensed under the Creative Commons Attribution-ShareAlike 3.0
 # Unported License: http://creativecommons.org/licenses/by-sa/3.0/
@@ -10,298 +14,177 @@
 # Attribution required: please include my name in any derivative and let me
 # know how you have improved it!
 
-# Specify which Libreswan version to install. See: https://libreswan.org
-SWAN_VER=3.29
+# (Optional) Specify which Libreswan version to install. See: https://libreswan.org
+# If not specified, the latest supported version will be installed.
+SWAN_VER=
 
 ### DO NOT edit below this line ###
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-exiterr()  { echo "Error: $1" >&2; exit 1; }
-exiterr2() { exiterr "'apt-get install' failed."; }
+exiterr() { echo "Error: $1" >&2; exit 1; }
+
+check_root() {
+  if [ "$(id -u)" != 0 ]; then
+    exiterr "Script must be run as root. Try 'sudo sh $0'"
+  fi
+}
+
+check_vz() {
+  if [ -f /proc/user_beancounters ]; then
+    exiterr "OpenVZ VPS is not supported."
+  fi
+}
+
+check_os() {
+  rh_file="/etc/redhat-release"
+  if [ -f "$rh_file" ]; then
+    os_type=centos
+    if grep -q "Red Hat" "$rh_file"; then
+      os_type=rhel
+    fi
+    [ -f /etc/oracle-release ] && os_type=ol
+    grep -qi rocky "$rh_file" && os_type=rocky
+    grep -qi alma "$rh_file" && os_type=alma
+    if grep -q "release 7" "$rh_file"; then
+      os_ver=7
+    elif grep -q "release 8" "$rh_file"; then
+      os_ver=8
+      grep -qi stream "$rh_file" && os_ver=8s
+      if [ "$os_type$os_ver" = "centos8" ]; then
+        exiterr "CentOS Linux 8 is EOL and not supported."
+      fi
+    elif grep -q "release 9" "$rh_file"; then
+      os_ver=9
+      grep -qi stream "$rh_file" && os_ver=9s
+    else
+      exiterr "This script only supports CentOS/RHEL 7-9."
+    fi
+  elif grep -qs "Amazon Linux release 2" /etc/system-release; then
+    os_type=amzn
+    os_ver=2
+  else
+    os_type=$(lsb_release -si 2>/dev/null)
+    [ -z "$os_type" ] && [ -f /etc/os-release ] && os_type=$(. /etc/os-release && printf '%s' "$ID")
+    case $os_type in
+      [Uu]buntu)
+        os_type=ubuntu
+        ;;
+      [Dd]ebian|[Kk]ali)
+        os_type=debian
+        ;;
+      [Rr]aspbian)
+        os_type=raspbian
+        ;;
+      [Aa]lpine)
+        os_type=alpine
+        ;;
+      *)
+cat 1>&2 <<'EOF'
+Error: This script only supports one of the following OS:
+       Ubuntu, Debian, CentOS/RHEL, Rocky Linux, AlmaLinux,
+       Oracle Linux, Amazon Linux 2 or Alpine Linux
+EOF
+        exit 1
+        ;;
+    esac
+    if [ "$os_type" = "alpine" ]; then
+      os_ver=$(. /etc/os-release && printf '%s' "$VERSION_ID" | cut -d '.' -f 1,2)
+      if [ "$os_ver" != "3.15" ] && [ "$os_ver" != "3.16" ]; then
+        exiterr "This script only supports Alpine Linux 3.15/3.16."
+      fi
+    else
+      os_ver=$(sed 's/\..*//' /etc/debian_version | tr -dc 'A-Za-z0-9')
+      if [ "$os_ver" = 8 ] || [ "$os_ver" = "jessiesid" ]; then
+        exiterr "Debian 8 or Ubuntu < 16.04 is not supported."
+      fi
+    fi
+  fi
+}
+
+check_libreswan() {
+  ipsec_ver=$(/usr/local/sbin/ipsec --version 2>/dev/null)
+  if ! printf '%s' "$ipsec_ver" | grep -qi 'libreswan'; then
+cat 1>&2 <<'EOF'
+Error: This script requires Libreswan already installed.
+       See: https://github.com/hwdsl2/setup-ipsec-vpn
+EOF
+    exit 1
+  fi
+}
+
+install_pkgs() {
+  if ! command -v wget >/dev/null 2>&1; then
+    if [ "$os_type" = "ubuntu" ] || [ "$os_type" = "debian" ] || [ "$os_type" = "raspbian" ]; then
+      export DEBIAN_FRONTEND=noninteractive
+      (
+        set -x
+        apt-get -yqq update || apt-get -yqq update
+      ) || exiterr "'apt-get update' failed."
+      (
+        set -x
+        apt-get -yqq install wget >/dev/null || apt-get -yqq install wget >/dev/null
+      ) || exiterr "'apt-get install wget' failed."
+    elif [ "$os_type" != "alpine" ]; then
+      (
+        set -x
+        yum -y -q install wget >/dev/null || yum -y -q install wget >/dev/null
+      ) || exiterr "'yum install wget' failed."
+    fi
+  fi
+  if [ "$os_type" = "alpine" ]; then
+    (
+      set -x
+      apk add -U -q bash coreutils grep sed wget
+    ) || exiterr "'apk add' failed."
+  fi
+}
+
+get_setup_url() {
+  base_url1="https://github.com/hwdsl2/setup-ipsec-vpn/raw/master/extras"
+  base_url2="https://gitlab.com/hwdsl2/setup-ipsec-vpn/-/raw/master/extras"
+  sh_file="vpnupgrade_ubuntu.sh"
+  if [ "$os_type" = "centos" ] || [ "$os_type" = "rhel" ] || [ "$os_type" = "rocky" ] \
+    || [ "$os_type" = "alma" ] || [ "$os_type" = "ol" ]; then
+    sh_file="vpnupgrade_centos.sh"
+  elif [ "$os_type" = "amzn" ]; then
+    sh_file="vpnupgrade_amzn.sh"
+  elif [ "$os_type" = "alpine" ]; then
+    sh_file="vpnupgrade_alpine.sh"
+  fi
+  setup_url1="$base_url1/$sh_file"
+  setup_url2="$base_url2/$sh_file"
+}
+
+run_setup() {
+  status=0
+  if tmpdir=$(mktemp --tmpdir -d vpn.XXXXX 2>/dev/null); then
+    if ( set -x; wget -t 3 -T 30 -q -O "$tmpdir/vpnup.sh" "$setup_url1" \
+      || wget -t 3 -T 30 -q -O "$tmpdir/vpnup.sh" "$setup_url2" \
+      || curl -m 30 -fsL "$setup_url1" -o "$tmpdir/vpnup.sh" 2>/dev/null ); then
+      VPN_UPDATE_SWAN_VER="$SWAN_VER" /bin/bash "$tmpdir/vpnup.sh" || status=1
+    else
+      status=1
+      echo "Error: Could not download update script." >&2
+    fi
+    /bin/rm -f "$tmpdir/vpnup.sh"
+    /bin/rmdir "$tmpdir"
+  else
+    exiterr "Could not create temporary directory."
+  fi
+}
 
 vpnupgrade() {
-
-os_type=$(lsb_release -si 2>/dev/null)
-if [ -z "$os_type" ]; then
-  [ -f /etc/os-release  ] && os_type=$(. /etc/os-release  && printf '%s' "$ID")
-  [ -f /etc/lsb-release ] && os_type=$(. /etc/lsb-release && printf '%s' "$DISTRIB_ID")
-fi
-if ! printf '%s' "$os_type" | head -n 1 | grep -qiF -e ubuntu -e debian -e raspbian; then
-  exiterr "This script only supports Ubuntu and Debian."
-fi
-
-if [ "$(sed 's/\..*//' /etc/debian_version)" = "7" ]; then
-  exiterr "Debian 7 is not supported."
-fi
-
-if [ -f /proc/user_beancounters ]; then
-  exiterr "OpenVZ VPS is not supported."
-fi
-
-if [ "$(id -u)" != 0 ]; then
-  exiterr "Script must be run as root. Try 'sudo sh $0'"
-fi
-
-case "$SWAN_VER" in
-  3.19|3.2[01235679])
-    /bin/true
-    ;;
-  *)
-cat 1>&2 <<EOF
-Error: Libreswan version '$SWAN_VER' is not supported.
-  This script can install one of the following versions:
-  3.19-3.23, 3.25-3.27 and 3.29
-EOF
-    exit 1
-    ;;
-esac
-
-dns_state=0
-case "$SWAN_VER" in
-  3.2[35679])
-    DNS_SRV1=$(grep "modecfgdns1=" /etc/ipsec.conf | head -n 1 | cut -d '=' -f 2)
-    DNS_SRV2=$(grep "modecfgdns2=" /etc/ipsec.conf | head -n 1 | cut -d '=' -f 2)
-    [ -n "$DNS_SRV1" ] && dns_state=2
-    [ -n "$DNS_SRV1" ] && [ -n "$DNS_SRV2" ] && dns_state=1
-    [ "$(grep -c "modecfgdns1=" /etc/ipsec.conf)" -gt "1" ] && dns_state=5
-    ;;
-  3.19|3.2[012])
-    DNS_SRVS=$(grep "modecfgdns=" /etc/ipsec.conf | head -n 1 | cut -d '=' -f 2)
-    DNS_SRVS=$(printf '%s' "$DNS_SRVS" | cut -d '"' -f 2 | cut -d "'" -f 2 | sed 's/,/ /g' | tr -s ' ')
-    DNS_SRV1=$(printf '%s' "$DNS_SRVS" | cut -d ' ' -f 1)
-    DNS_SRV2=$(printf '%s' "$DNS_SRVS" | cut -s -d ' ' -f 2)
-    [ -n "$DNS_SRV1" ] && dns_state=4
-    [ -n "$DNS_SRV1" ] && [ -n "$DNS_SRV2" ] && dns_state=3
-    [ "$(grep -c "modecfgdns=" /etc/ipsec.conf)" -gt "1" ] && dns_state=6
-    ;;
-esac
-
-ipsec_ver=$(/usr/local/sbin/ipsec --version 2>/dev/null)
-ipsec_ver_short=$(printf '%s' "$ipsec_ver" | sed -e 's/Linux Libreswan/Libreswan/' -e 's/ (netkey) on .*//')
-if ! printf '%s' "$ipsec_ver" | grep -q "Libreswan"; then
-  exiterr "This script requires Libreswan already installed."
-fi
-
-if printf '%s' "$ipsec_ver" | grep -qF "$SWAN_VER"; then
-  echo "You already have Libreswan version $SWAN_VER installed! "
-  echo "If you continue, the same version will be re-installed."
-  echo
-  printf "Do you wish to continue anyway? [y/N] "
-  read -r response
-  case $response in
-    [yY][eE][sS]|[yY])
-      echo
-      ;;
-    *)
-      echo "Aborting."
-      exit 1
-      ;;
-  esac
-fi
-
-clear
-
-cat <<EOF
-Welcome! This script will build and install Libreswan on your server.
-Additional packages required for compilation will also be installed.
-
-It is intended for upgrading servers to a newer Libreswan version.
-
-Current version:    $ipsec_ver_short
-Version to install: Libreswan $SWAN_VER
-
-EOF
-
-case "$SWAN_VER" in
-  3.2[35])
-cat <<'EOF'
-WARNING: Libreswan 3.23 and 3.25 have an issue with connecting multiple
-    IPsec/XAuth VPN clients from behind the same NAT (e.g. home router).
-    DO NOT upgrade to 3.23/3.25 if your use cases include the above.
-
-EOF
-    ;;
-esac
-
-cat <<'EOF'
-NOTE: Libreswan versions 3.19 and newer require some configuration changes.
-    This script will make the following updates to your /etc/ipsec.conf:
-
-    - Replace "auth=esp" with "phase2=esp"
-    - Replace "forceencaps=yes" with "encapsulation=yes"
-    - Optimize VPN ciphers for "ike=" and "phase2alg="
-EOF
-
-if [ "$dns_state" = "1" ] || [ "$dns_state" = "2" ]; then
-cat <<'EOF'
-    - Replace "modecfgdns1" and "modecfgdns2" with "modecfgdns"
-EOF
-fi
-
-if [ "$dns_state" = "3" ] || [ "$dns_state" = "4" ]; then
-cat <<'EOF'
-    - Replace "modecfgdns" with "modecfgdns1" and "modecfgdns2"
-EOF
-fi
-
-if [ "$SWAN_VER" = "3.29" ]; then
-cat <<'EOF'
-    - Move "ikev2=never" to section "conn shared"
-EOF
-fi
-
-cat <<'EOF'
-
-    Your other VPN configuration files will not be modified.
-
-EOF
-
-printf "Do you wish to continue? [y/N] "
-read -r response
-case $response in
-  [yY][eE][sS]|[yY])
-    echo
-    echo "Please be patient. Setup is continuing..."
-    echo
-    ;;
-  *)
-    echo "Aborting."
-    exit 1
-    ;;
-esac
-
-# Create and change to working dir
-mkdir -p /opt/src
-cd /opt/src || exit 1
-
-# Update package index
-export DEBIAN_FRONTEND=noninteractive
-apt-get -yq update || exiterr "'apt-get update' failed."
-
-# Install necessary packages
-apt-get -yq install libnss3-dev libnspr4-dev pkg-config \
-  libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev \
-  libcurl4-nss-dev libnss3-tools libevent-dev \
-  flex bison gcc make wget sed || exiterr2
-
-# Compile and install Libreswan
-swan_file="libreswan-$SWAN_VER.tar.gz"
-swan_url1="https://github.com/libreswan/libreswan/archive/v$SWAN_VER.tar.gz"
-swan_url2="https://download.libreswan.org/$swan_file"
-if ! { wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url1" || wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url2"; }; then
-  exit 1
-fi
-/bin/rm -rf "/opt/src/libreswan-$SWAN_VER"
-tar xzf "$swan_file" && /bin/rm -f "$swan_file"
-cd "libreswan-$SWAN_VER" || exit 1
-[ "$SWAN_VER" = "3.22" ] && sed -i '/^#define LSWBUF_CANARY/s/-2$/((char) -2)/' include/lswlog.h
-[ "$SWAN_VER" = "3.23" ] || [ "$SWAN_VER" = "3.25" ] && sed -i '/docker-targets\.mk/d' Makefile
-[ "$SWAN_VER" = "3.26" ] && sed -i 's/-lfreebl //' mk/config.mk
-[ "$SWAN_VER" = "3.26" ] && sed -i '/blapi\.h/d' programs/pluto/keys.c
-cat > Makefile.inc.local <<'EOF'
-WERROR_CFLAGS =
-USE_DNSSEC = false
-USE_DH31 = false
-USE_NSS_AVA_COPY = true
-USE_NSS_IPSEC_PROFILE = false
-USE_GLIBC_KERN_FLIP_HEADERS = true
-EOF
-if [ "$(packaging/utils/lswan_detect.sh init)" = "systemd" ]; then
-  apt-get -yq install libsystemd-dev || exiterr2
-fi
-NPROCS=$(grep -c ^processor /proc/cpuinfo)
-[ -z "$NPROCS" ] && NPROCS=1
-make "-j$((NPROCS+1))" -s base && make -s install-base
-
-# Verify the install and clean up
-cd /opt/src || exit 1
-/bin/rm -rf "/opt/src/libreswan-$SWAN_VER"
-if ! /usr/local/sbin/ipsec --version 2>/dev/null | grep -qF "$SWAN_VER"; then
-  exiterr "Libreswan $SWAN_VER failed to build."
-fi
-
-# Update ipsec.conf
-IKE_NEW="  ike=aes256-sha2,aes128-sha2,aes256-sha1,aes128-sha1,aes256-sha2;modp1024,aes128-sha1;modp1024"
-PHASE2_NEW="  phase2alg=aes_gcm-null,aes128-sha1,aes256-sha1,aes256-sha2_512,aes128-sha2,aes256-sha2"
-
-if uname -m | grep -qi '^arm'; then
-  PHASE2_NEW="  phase2alg=aes_gcm-null,aes128-sha1,aes256-sha1,aes128-sha2,aes256-sha2"
-fi
-
-sed -i".old-$(date +%F-%T)" \
-    -e "s/^[[:space:]]\+auth=esp\$/  phase2=esp/g" \
-    -e "s/^[[:space:]]\+forceencaps=yes\$/  encapsulation=yes/g" \
-    -e "s/^[[:space:]]\+ike=.\+\$/$IKE_NEW/g" \
-    -e "s/^[[:space:]]\+phase2alg=.\+\$/$PHASE2_NEW/g" /etc/ipsec.conf
-
-if [ "$dns_state" = "1" ]; then
-  sed -i -e "s/modecfgdns1=.*/modecfgdns=\"$DNS_SRV1 $DNS_SRV2\"/" \
-      -e "/modecfgdns2/d" /etc/ipsec.conf
-elif [ "$dns_state" = "2" ]; then
-  sed -i "s/modecfgdns1=.*/modecfgdns=$DNS_SRV1/" /etc/ipsec.conf
-elif [ "$dns_state" = "3" ]; then
-  sed -i "/modecfgdns=/a \  modecfgdns2=$DNS_SRV2" /etc/ipsec.conf
-  sed -i "s/modecfgdns=.*/modecfgdns1=$DNS_SRV1/" /etc/ipsec.conf
-elif [ "$dns_state" = "4" ]; then
-  sed -i "s/modecfgdns=.*/modecfgdns1=$DNS_SRV1/" /etc/ipsec.conf
-fi
-
-if [ "$SWAN_VER" = "3.29" ]; then
-  sed -i "/ikev2=never/d" /etc/ipsec.conf
-  sed -i "/dpdaction=clear/a \  ikev2=never" /etc/ipsec.conf
-fi
-
-# Restart IPsec service
-mkdir -p /run/pluto
-service ipsec restart
-
-cat <<EOF
-
-
-===================================================
-
-Libreswan $SWAN_VER has been successfully installed!
-
-===================================================
-
-EOF
-
-if [ "$dns_state" = "5" ]; then
-cat <<'EOF'
-IMPORTANT: Users upgrading to Libreswan 3.23 or newer must edit /etc/ipsec.conf
-    and replace all occurrences of these two lines:
-
-      modecfgdns1=DNS_SERVER_1
-      modecfgdns2=DNS_SERVER_2
-
-    with a single line like this:
-
-      modecfgdns="DNS_SERVER_1 DNS_SERVER_2"
-
-    Then run "sudo service ipsec restart".
-
-EOF
-elif [ "$dns_state" = "6" ]; then
-cat <<'EOF'
-IMPORTANT: Users downgrading to Libreswan 3.22 or older must edit /etc/ipsec.conf
-    and replace all occurrences of this line:
-
-      modecfgdns="DNS_SERVER_1 DNS_SERVER_2"
-
-    with two lines like this:
-
-      modecfgdns1=DNS_SERVER_1
-      modecfgdns2=DNS_SERVER_2
-
-    Then run "sudo service ipsec restart".
-
-EOF
-fi
-
+  check_root
+  check_vz
+  check_os
+  check_libreswan
+  install_pkgs
+  get_setup_url
+  run_setup
 }
 
 ## Defer setup until we have the complete script
 vpnupgrade "$@"
 
-exit 0
+exit "$status"

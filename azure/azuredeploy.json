@@ -24,18 +24,20 @@
     "image": {
       "type": "string",
       "allowedValues": [
-        "ubuntu1604",
-        "debian9"
+        "ubuntu22.04",
+        "ubuntu20.04",
+        "ubuntu18.04"
       ],
-      "defaultValue": "debian9",
+      "defaultValue": "ubuntu22.04",
       "metadata": {
-        "description": "OS to use. Debian 9 or Ubuntu 16.04 LTS"
+        "description": "OS to use. Ubuntu 22.04, 20.04 or 18.04."
       }
     },
     "VMSize": {
       "type": "string",
       "defaultValue": "Standard_B1s",
       "allowedValues": [
+        "Standard_B1ls",
         "Standard_B1s",
         "Standard_B1ms",
         "Standard_B2s",
@@ -47,6 +49,7 @@
     }
   },
   "variables": {
+    "quote": "'",
     "location": "[resourceGroup().location]",
     "vmName": "vpnserver",
     "virtualNetworkName": "vpnVnet",
@@ -58,20 +61,26 @@
     "vhdStorageType": "Standard_LRS",
     "vnetId": "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
     "SubnetRef": "[concat(variables('vnetId'), '/subnets/', variables('subnetName'))]",
-    "ubuntu1604": {
+    "ubuntu22.04": {
       "publisher": "Canonical",
-      "offer": "UbuntuServer",
-      "sku": "16.04-LTS",
+      "offer": "0001-com-ubuntu-server-jammy",
+      "sku": "22_04-lts",
       "version": "latest"
     },
-    "debian9": {
-      "publisher": "credativ",
-      "offer": "Debian",
-      "sku": "9",
+    "ubuntu20.04": {
+      "publisher": "Canonical",
+      "offer": "0001-com-ubuntu-server-focal",
+      "sku": "20_04-lts",
+      "version": "latest"
+    },
+    "ubuntu18.04": {
+      "publisher": "Canonical",
+      "offer": "UbuntuServer",
+      "sku": "18.04-LTS",
       "version": "latest"
     },
     "installScriptURL": "https://raw.githubusercontent.com/hwdsl2/setup-ipsec-vpn/master/azure/install.sh",
-    "installCommand": "[concat('sh install.sh ', parameters('preSharedKey'), ' ', parameters('username'), ' ', parameters('password'))]"
+    "installCommand": "[concat('sh install.sh ', variables('quote'), parameters('preSharedKey'), variables('quote'), ' ', variables('quote'), parameters('username'), variables('quote'), ' ', variables('quote'), parameters('password'), variables('quote'))]"
   },
   "resources": [
     {
@@ -170,7 +179,7 @@
           "osDisk": {
             "name": "osdisk",
             "vhd": {
-              "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts/', variables('storageName'))).primaryEndpoints.blob, 'vmachines/', variables('vmName'), '.vhd')]"              
+              "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts/', variables('storageName'))).primaryEndpoints.blob, 'vmachines/', variables('vmName'), '.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
@@ -183,7 +192,7 @@
             }
           ]
         }
-      } 
+      }
     },
     {
       "type": "Microsoft.Compute/virtualMachines/extensions",
